@@ -168,8 +168,12 @@ a {
 }
 .speeds {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
+}
+/* calm is the opt-in for little kids: its own row, under the three speeds */
+.speeds button.calm {
+  grid-column: 1 / -1;
 }
 .speeds button {
   font-size: 13px;
@@ -207,7 +211,7 @@ a {
   gap: 8px;
 }
 .hud .back {
-  min-width: 48px;
+  min-width: 44px;
   padding: 0;
   font-size: 22px;
 }
@@ -217,6 +221,9 @@ a {
   flex-direction: column;
   align-items: center;
   font-size: 18px;
+}
+.stat b {
+  white-space: nowrap;
 }
 .stat span {
   font-size: 11px;
@@ -261,18 +268,17 @@ a {
     transform: scale(1.5);
   }
 }
-#jar .germ {
+/* the beat: one variable, --pulse, set once a frame from the music clock (1 on
+   the beat, easing to 0). every piece squashes a little on it and germs hop.
+   no per-piece animation: the jar redraws as pieces fall, which would restart
+   one and make it stutter. */
+#jar .piece {
   transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: wiggle 1.6s ease-in-out infinite alternate;
+  transform-origin: 50% 100%;
+  transform: scale(calc(1 + var(--pulse, 0) * 0.07), calc(1 - var(--pulse, 0) * 0.07));
 }
-@keyframes wiggle {
-  from {
-    transform: rotate(-4deg);
-  }
-  to {
-    transform: rotate(4deg);
-  }
+#jar .germ {
+  transform: translateY(calc(var(--pulse, 0) * -9px)) scale(calc(1 + var(--pulse, 0) * 0.05), calc(1 - var(--pulse, 0) * 0.05));
 }
 .chain {
   position: absolute;
@@ -447,10 +453,16 @@ a {
   z-index: 7;
 }
 @media (prefers-reduced-motion: reduce) {
-  #jar .germ,
   #jar .pop {
     animation: none;
   }
+  #jar .piece,
+  #jar .germ {
+    transform: none;
+  }
+}
+#sound {
+  font-size: 15px;
 }
 
 /* the build, top right, small, like the rest of the house */

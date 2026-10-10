@@ -1,18 +1,20 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { begin, campaign, daily, LEVELS, shared, type Deal } from "./lib/engine/levels.ts";
-  import { drop, move, nudge, rotate, tick, type Game } from "./lib/engine/capsule.ts";
+  import { drop, move, nudge, rotate, rowsPerSecond, soften, tick, type Game } from "./lib/engine/capsule.ts";
   import { dailySeed } from "./lib/engine/seed.ts";
   import type { Speed } from "./lib/engine/types.ts";
   import { jar, preview, type Pop } from "./lib/draw.ts";
   import { LOOKS, loadLook, saveLook, type Look } from "./lib/skins.ts";
+  import { createMusic } from "./lib/music.ts";
   import { readJson, readSlot, writeJson, writeSlot } from "./lib/storage.ts";
   import { installControl } from "./install.ts";
   import { updateControl, type UpdateCheck } from "./pwa.ts";
 
   const ETHOS =
     "no ads, no lives, no timers, nothing to buy, no accounts, no cookies, nothing sold or shared.";
-  const SPEEDS: Speed[] = ["calm", "slow", "medium", "fast"];
+  // calm is last: an opt-in for little kids, the capsule waits until it is brought down
+  const SPEEDS: Speed[] = ["slow", "medium", "fast", "calm"];
 
   // progress: the furthest level unlocked, the level picked, the best score
   interface Progress { reached: number; level: number; best: number }
@@ -21,13 +23,28 @@
   const keep = () => (saved = writeJson(PROGRESS, progress));
   let saved = $state(true);
 
-  // calm is the default: the capsule waits until you drop it
+  // capsules fall on their own by default (roy, 2026-10-10: it played too much like
+  // a puzzle). a speed someone already picked, calm included, stays theirs.
   const SPEED = "zap:speed";
-  let speed = $state<Speed>(SPEEDS.includes(readSlot(SPEED) as Speed) ? (readSlot(SPEED) as Speed) : "calm");
+  let speed = $state<Speed>(SPEEDS.includes(readSlot(SPEED) as Speed) ? (readSlot(SPEED) as Speed) : "slow");
   function pickSpeed(s: Speed) {
     speed = s;
     writeSlot(SPEED, s);
   }
+
+  // the music: on unless someone turned it off
+  const SOUND = "zap:sound";
+  const soundAtStart = readSlot(SOUND) !== "off";
+  let sound = $state(soundAtStart);
+  const music = createMusic();
+  music.setSound(soundAtStart);
+  function toggleSound() {
+    sound = !sound;
+    writeSlot(SOUND, sound ? "on" : "off");
+    music.setSound(sound);
+  }
+  const fallRate = (g: Game) => rowsPerSecond(g.speed, g.level, g.capsules);
+  const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let look = $state<Look>(loadLook());
   $effect(() => {
@@ -77,6 +94,7 @@
     chain = 0;
     screen = "play";
     frame++;
+    music.play(fallRate(game));
   }
   const playCampaign = () => play(campaign(progress.level), "campaign");
   const playDaily = () => play(daily(dailySeed()), "daily");
@@ -92,7 +110,7 @@
     if (game.capsules !== before || game.status !== "playing") {
       const steps = game.last;
       if (steps.length) {
-        pops = steps.flatMap((s) => s.cleared.map((i, k) => ({ i, color: s.colors[k] })));
+        pops = steps.flatMap((s) => s.cleared.map((i, k) => ({ i, color: s.colors[k], germ: s.kinds[k] === "germ" })));
         chain = steps.length;
         clearTimeout(popTimer);
         popTimer = setTimeout(() => ((pops = []), (chain = 0)), 450);
@@ -124,56 +142,58 @@
   }
   const again = () => deal && play(deal, mode);
 
-  // real-time gravity: the same fall at any frame rate; calm never falls
+  // real time: gravity, the lock delay, a held drop, and the beat. the same fall
+  // at any frame rate; calm only falls while the drop is held.
   let raf = 0;
   let last = 0;
   function loop(now: number) {
-    if (game && screen === "play" && !sheet && game.status === "playing" && last) {
-      const before = game.capsules;
-      const y = game.active?.body.y;
-      tick(game, Math.min(0.1, (now - last) / 1000));
-      if (game.capsules !== before || game.active?.body.y !== y || game.status !== "playing") settled(before);
+    const live = game && screen === "play" && !sheet && game.status === "playing" && !document.hidden;
+    if (live && last) {
+      const before = game!.capsules;
+      const y = game!.active?.body.y;
+      tick(game!, Math.min(0.1, (now - last) / 1000));
+      if (game!.capsules !== before || game!.active?.body.y !== y || game!.status !== "playing") settled(before);
+      music.tempo(fallRate(game!));
     }
+    // the music runs only while a game is being played
+    if (!live || game?.status !== "playing") music.pause();
+    // every piece hops on the beat; one css variable, set once a frame
+    if (jarEl && !reduced) jarEl.style.setProperty("--pulse", music.pulse().toFixed(3));
     last = now;
     raf = requestAnimationFrame(loop);
   }
+  // back from the menu sheet or a hidden tab: the music picks up again
+  function resume() {
+    if (game && screen === "play" && !sheet && game.status === "playing" && !document.hidden) music.play(fallRate(game));
+  }
 
-  // hold to repeat a slide; hold the drop button to ease the capsule down
+  // hold to repeat a slide; hold the drop button to bring the capsule down fast.
+  // the two are separate, so one thumb can hold the drop while the other steers.
   // a hold belongs to the game it started on: a new game, the menu, an open
   // sheet or a cancelled pointer ends it, so no stray repeat reaches a new board
-  let repeat: ReturnType<typeof setTimeout> | undefined;
-  let dropHeld = false;
-  let dropArmed = false;
-  function release() {
-    clearTimeout(repeat);
-    repeat = undefined;
-    dropHeld = false;
-    dropArmed = false;
+  let slide: ReturnType<typeof setTimeout> | undefined;
+  function releaseSlide() {
+    clearTimeout(slide);
+    slide = undefined;
   }
-  function repeating(fn: (g: Game) => unknown, first: number, every: number) {
-    const owner = game;
-    const again = () => {
-      if (game !== owner || screen !== "play" || sheet) return release();
-      fn(owner!);
-      repeat = setTimeout(again, every);
-    };
-    repeat = setTimeout(again, first);
+  // the held drop is a flag on the game itself, so a new game starts let go
+  const releaseDrop = () => game && soften(game, false);
+  function release() {
+    releaseSlide();
+    releaseDrop();
   }
   function hold(fn: (g: Game) => unknown) {
-    release();
+    releaseSlide();
     act(fn);
-    repeating((g) => act(() => fn(g)), 220, 90);
+    const owner = game;
+    const again = () => {
+      if (game !== owner || screen !== "play" || sheet) return releaseSlide();
+      act(fn);
+      slide = setTimeout(again, 90);
+    };
+    slide = setTimeout(again, 220);
   }
-  function dropDown() {
-    release();
-    dropArmed = true;
-    repeating(() => ((dropHeld = true), act(nudge)), 220, 70);
-  }
-  function dropUp() {
-    const tap = dropArmed && !dropHeld;
-    release();
-    if (tap) act(drop);
-  }
+  const dropDown = () => act((g) => soften(g, true));
 
   function key(e: KeyboardEvent) {
     if (screen !== "play" || sheet) return;
@@ -185,13 +205,21 @@
       ArrowUp: (g) => rotate(g, 1),
       x: (g) => rotate(g, 1),
       z: (g) => rotate(g, -1),
-      ArrowDown: nudge,
       " ": drop,
     };
+    // the down arrow is the held drop: down while held, let go on release
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!e.repeat) act((g) => soften(g, true));
+      return;
+    }
     const fn = map[e.key];
     if (!fn) return;
     e.preventDefault();
     act(fn);
+  }
+  function keyUp(e: KeyboardEvent) {
+    if (e.key === "ArrowDown") releaseDrop();
   }
 
   // on the jar: a tap turns, a sideways drag slides a column at a time, a flick down drops
@@ -263,10 +291,12 @@
     install = installControl((v) => (installVisible = v), () => (sheet = "ios"));
     updates = updateControl(() => (updateReady = true));
     addEventListener("keydown", key);
-    // a hold cannot outlive the player looking away
+    addEventListener("keyup", keyUp);
+    // a hold cannot outlive the player looking away, and the music waits too
     addEventListener("blur", release);
     addEventListener("pagehide", release);
     document.addEventListener("visibilitychange", release);
+    document.addEventListener("visibilitychange", resume);
     raf = requestAnimationFrame(loop);
     // a friend's link opens straight onto their board
     const q = new URLSearchParams(location.search);
@@ -281,12 +311,15 @@
     install?.dispose();
     updates?.dispose();
     cancelAnimationFrame(raf);
-    clearTimeout(repeat);
+    clearTimeout(slide);
+    music.dispose();
     if (typeof removeEventListener === "function") {
       removeEventListener("keydown", key);
+      removeEventListener("keyup", keyUp);
       removeEventListener("blur", release);
       removeEventListener("pagehide", release);
       document.removeEventListener("visibilitychange", release);
+      document.removeEventListener("visibilitychange", resume);
     }
   });
 </script>
@@ -307,7 +340,7 @@
     </div>
     <div class="speeds" role="radiogroup" aria-label="speed">
       {#each SPEEDS as s}
-        <button role="radio" aria-checked={speed === s} class:on={speed === s} onclick={() => pickSpeed(s)}>{s.toUpperCase()}</button>
+        <button role="radio" aria-checked={speed === s} class:on={speed === s} class:calm={s === "calm"} onclick={() => pickSpeed(s)}>{s === "calm" ? "CALM · NO FALL" : s.toUpperCase()}</button>
       {/each}
     </div>
     <button id="daily" onclick={playDaily}>DAILY</button>
@@ -316,6 +349,7 @@
       <button id="howto" onclick={() => (sheet = "howto")}>HOW TO PLAY</button>
       <button id="looks" onclick={() => (sheet = "looks")}>LOOKS</button>
     </div>
+    <button id="sound" aria-pressed={sound} onclick={toggleSound}>{sound ? "SOUND ON" : "SOUND OFF"}</button>
     <div class="row">
       {#if installVisible}<button id="install" onclick={() => install.prompt()}>INSTALL</button>{/if}
       <button id="about" onclick={() => (sheet = "about")}>ABOUT</button>
@@ -324,9 +358,10 @@
     {#if !saved}<p class="warn">this browser is not saving progress</p>{/if}
   </main>
 {:else if view}
-  <main class="play">
+  <main class="play" onpointerdowncapture={music.wake}>
     <header class="hud">
       <button class="back" aria-label="menu" onclick={() => (screen = "menu")}>☰</button>
+      <button id="hud-sound" class="back" aria-label={sound ? "sound on" : "sound off"} aria-pressed={sound} onclick={toggleSound}>{sound ? "♪" : "–"}</button>
       <div class="stat"><b>{mode === "daily" ? "DAILY" : mode === "friend" ? "FRIEND" : `LEVEL ${view.level}`}</b></div>
       <div class="stat" id="germs"><span>germs</span><b>{view.germs}</b></div>
       <div class="stat" id="score"><span>score</span><b>{view.score}</b></div>
@@ -367,12 +402,12 @@
       {/if}
     </div>
     <nav class="pad" aria-label="controls">
-      <button aria-label="left" onpointerdown={() => hold((g) => move(g, -1))} onpointerup={release} onpointerleave={release} onpointercancel={release} onlostpointercapture={release} onclick={(e) => e.detail === 0 && act((g) => move(g, -1))}>◀</button>
+      <button aria-label="left" onpointerdown={() => hold((g) => move(g, -1))} onpointerup={releaseSlide} onpointerleave={releaseSlide} onpointercancel={releaseSlide} onlostpointercapture={releaseSlide} onclick={(e) => e.detail === 0 && act((g) => move(g, -1))}>◀</button>
       <button aria-label="turn" onpointerdown={() => act((g) => rotate(g, 1))} onclick={(e) => e.detail === 0 && act((g) => rotate(g, 1))}
         ><svg class="turn" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" /></svg></button
       >
-      <button aria-label="right" onpointerdown={() => hold((g) => move(g, 1))} onpointerup={release} onpointerleave={release} onpointercancel={release} onlostpointercapture={release} onclick={(e) => e.detail === 0 && act((g) => move(g, 1))}>▶</button>
-      <button aria-label="drop" class="drop" onpointerdown={dropDown} onpointerup={dropUp} onpointerleave={release} onpointercancel={release} onlostpointercapture={release} onclick={(e) => e.detail === 0 && act(drop)}>▼</button>
+      <button aria-label="right" onpointerdown={() => hold((g) => move(g, 1))} onpointerup={releaseSlide} onpointerleave={releaseSlide} onpointercancel={releaseSlide} onlostpointercapture={releaseSlide} onclick={(e) => e.detail === 0 && act((g) => move(g, 1))}>▶</button>
+      <button aria-label="drop" class="drop" onpointerdown={dropDown} onpointerup={releaseDrop} onpointerleave={releaseDrop} onpointercancel={releaseDrop} onlostpointercapture={releaseDrop} onclick={(e) => e.detail === 0 && act(nudge)}>▼</button>
     </nav>
   </main>
 {/if}
@@ -386,12 +421,13 @@
       {#if sheet === "howto"}
         <h2>how to play</h2>
         <p>capsules drop into the jar. each one has two halves.</p>
-        <p><b>◀ ▶</b> slide it. the round arrow turns it. <b>▼</b> drops it. hold <b>▼</b> to ease it down.</p>
-        <p>on the jar: tap to turn, drag to slide, flick down to drop.</p>
+        <p><b>◀ ▶</b> slide it. the round arrow turns it. hold <b>▼</b> and it falls fast, and you can still slide and turn it.</p>
+        <p>when it lands you get a moment to slide it under a ledge or turn it into a gap before it sticks.</p>
+        <p>on the jar: tap to turn, drag to slide, flick down to drop it straight down.</p>
         <p>line up <b>four of one colour</b>, across or up and down, and they zap. germs count too.</p>
         <p>zap every germ to clear the jar. loose halves fall, and a fall that makes four again is a chain.</p>
         <p>each colour has its own shape: a circle, a triangle, a square.</p>
-        <p><b>calm</b> waits for you. slow, medium and fast fall on their own, a bit faster each level.</p>
+        <p>capsules fall on their own, a bit faster each level. pick slow, medium or fast. <b>calm</b> never falls by itself: hold <b>▼</b> to bring it down.</p>
       {:else if sheet === "looks"}
         <h2>looks</h2>
         <div class="looks">
@@ -409,7 +445,7 @@
         </div>
       {:else if sheet === "about"}
         <h2>about zap</h2>
-        <p>a cosy capsule puzzle. drop capsules into the jar, match four of a colour, and zap every germ. a new board every day, and one to send a friend.</p>
+        <p>a capsule game with a beat. drop capsules into the jar, match four of a colour, and zap every germ. a new board every day, and one to send a friend.</p>
         <p class="ethos">{ETHOS}</p>
         <p class="version">version {__APP_VERSION__}</p>
         <button onclick={checkUpdate}>CHECK FOR UPDATE</button>
