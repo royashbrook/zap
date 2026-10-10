@@ -90,3 +90,78 @@ test('a jar filled to the top loses when the next capsule has no room', () => {
   put(g, 3, 1, germ(2))
   assert.equal(start(g, 1, 3).status, 'lost')
 })
+
+// playtest round 1 (#3, #4): a stronger ramp, a lock delay, a soft drop that steers
+import { LOCK_DELAY, MAX_RATE, MAX_RESETS, SOFT_RATE, nudge, rowsPerSecond, soften } from '../src/lib/engine/capsule.ts'
+
+const run = (game, seconds, step = 1 / 60) => { for (let t = 0; t < seconds; t += step) tick(game, step) }
+// a jar with one germ out of the way, so a lock is never a win
+const quiet = () => { const g = jar(); put(g, 7, B, germ(2)); return g }
+
+test('the ramp: faster each level and every ten capsules, never past the cap', () => {
+  assert.ok(rowsPerSecond('slow', 2) > rowsPerSecond('slow', 1))
+  assert.ok(rowsPerSecond('slow', 5, 10) > rowsPerSecond('slow', 5, 9))
+  assert.equal(rowsPerSecond('calm', 30, 300), 0)
+  assert.equal(rowsPerSecond('fast', 30, 300), MAX_RATE)
+  assert.ok(rowsPerSecond('slow', 30, 300) <= 1.2 * 3)
+})
+
+test('a landed capsule waits LOCK_DELAY before it locks', () => {
+  const game = start(quiet(), 1, 4, 'fast')
+  game.active.body.y = B // flat on the floor
+  run(game, LOCK_DELAY * 0.8)
+  assert.equal(game.capsules, 1, 'still the same capsule, resting')
+  run(game, LOCK_DELAY * 0.5)
+  assert.equal(game.capsules, 2, 'locked, the next one appeared')
+})
+
+test('a resting capsule slides under an overhang before it locks', () => {
+  const g = quiet()
+  // a roof over columns 0-1, one row up from the floor, nothing under it
+  put(g, 0, B - 1, germ(1)), put(g, 1, B - 1, germ(1))
+  const game = start(g, 1, 4, 'fast')
+  move(game, -1) // flat over columns 2-3, clear of the roof
+  while (game.resting === null) tick(game, 1 / 60) // gravity brings it to the floor
+  assert.equal(game.active.body.y, B)
+  assert.ok(move(game, -1) && move(game, -1), 'slid along the floor, under the roof')
+  run(game, LOCK_DELAY + 0.1)
+  assert.equal(game.capsules, 2, 'then it locked')
+  assert.equal(at(game.grid, 0, B)?.kind, 'half', 'locked under the roof')
+  assert.equal(at(game.grid, 1, B)?.kind, 'half')
+  assert.equal(at(game.grid, 0, B - 1)?.kind, 'germ', 'the roof is still there')
+})
+
+test('moves buy time only MAX_RESETS times, then it locks', () => {
+  const game = start(quiet(), 1, 4, 'calm')
+  game.active.body.y = B
+  game.resting = 0
+  for (let i = 0; i < MAX_RESETS; i++) {
+    run(game, LOCK_DELAY * 0.6)
+    move(game, i % 2 ? 1 : -1)
+  }
+  assert.equal(game.capsules, 1, 'fifteen moves kept it alive')
+  run(game, LOCK_DELAY * 0.6)
+  move(game, 1)
+  run(game, LOCK_DELAY * 0.6)
+  assert.equal(game.capsules, 2, 'the sixteenth move bought nothing')
+})
+
+test('soft drop falls at SOFT_RATE and steers; hard drop locks at once', () => {
+  const game = start(quiet(), 1, 4, 'calm')
+  soften(game, true)
+  run(game, 0.25)
+  const fell = game.active.body.y - 1
+  assert.ok(fell >= SOFT_RATE * 0.25 - 1, `fell ${fell} rows in a quarter second`)
+  assert.ok(move(game, -1), 'still steers while held')
+  soften(game, false)
+  const y = game.active.body.y
+  run(game, 1)
+  assert.equal(game.active.body.y, y, 'let go in calm: it waits again')
+  drop(game)
+  assert.equal(game.capsules, 2, 'hard drop locked it with no delay')
+  // a nudge on the floor starts the rest instead of locking
+  game.active.body.y = B
+  nudge(game)
+  assert.equal(game.capsules, 2)
+  assert.equal(game.resting, 0)
+})
