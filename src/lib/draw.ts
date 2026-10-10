@@ -24,6 +24,8 @@ const place = (x: number, y: number, art: string, extra = '') =>
 export interface Pop {
   i: number
   color: Color
+  // a germ pops with a surprised face; a capsule half just bursts
+  germ?: boolean
 }
 
 export function jar(game: Game, look: Look, pops: Pop[] = []) {
@@ -36,7 +38,7 @@ export function jar(game: Game, look: Look, pops: Pop[] = []) {
     for (let x = 0; x < WIDTH; x++) {
       const c = at(game.grid, x, y)
       if (!c) continue
-      out.push(place(x, y, c.kind === 'germ' ? look.germ(c.color) : look.half(c.color, c.link), c.kind === 'germ' ? ' class="germ"' : ''))
+      out.push(place(x, y, c.kind === 'germ' ? look.germ(c.color) : look.half(c.color, c.link), c.kind === 'germ' ? ' class="piece germ"' : ' class="piece"'))
     }
   const active = game.active
   if (active) {
@@ -48,12 +50,14 @@ export function jar(game: Game, look: Look, pops: Pop[] = []) {
           `<rect x="${(body.x + dx) * CELL + 12}" y="${(land + dy) * CELL + 12}" width="${CELL - 24}" height="${CELL - 24}" rx="30" fill="none" stroke="${look.jar.edge}" stroke-opacity=".45" stroke-width="6" stroke-dasharray="14 10" class="ghost"/>`,
         )
     body.turns[body.turn].forEach(([dx, dy], i) =>
-      out.push(place(body.x + dx, body.y + dy, look.half(colors[i], LINKS[body.turn][i]), ' class="active"')),
+      out.push(place(body.x + dx, body.y + dy, look.half(colors[i], LINKS[body.turn][i]), ' class="piece active"')),
     )
   }
   for (const p of pops)
     out.push(
-      `<circle cx="${(p.i % WIDTH) * CELL + CELL / 2}" cy="${Math.floor(p.i / WIDTH) * CELL + CELL / 2}" r="44" fill="${look.colors[p.color][0]}" class="pop"/>`,
+      p.germ
+        ? place(p.i % WIDTH, Math.floor(p.i / WIDTH), look.germ(p.color, true), ' class="pop surprised"')
+        : `<circle cx="${(p.i % WIDTH) * CELL + CELL / 2}" cy="${Math.floor(p.i / WIDTH) * CELL + CELL / 2}" r="44" fill="${look.colors[p.color][0]}" class="pop"/>`,
     )
   out.push(`<rect x="2" y="2" width="${WIDTH * CELL - 4}" height="${HEIGHT * CELL - 4}" rx="40" fill="none" stroke="${look.jar.edge}" stroke-width="8"/>`)
   return out.join('')
