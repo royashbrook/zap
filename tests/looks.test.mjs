@@ -5,8 +5,8 @@ import { jar } from '../src/lib/draw.ts'
 import { makeGrid, start, HEIGHT, WIDTH } from '../src/lib/engine/capsule.ts'
 import { put } from '../src/lib/engine/fall.ts'
 
-// roy, 2026-10-10 (#5): the germs looked scared. they smile now, and only look
-// surprised in the instant they pop.
+// #5: the germs looked scared. they smile now, and only look surprised in the
+// instant they pop.
 test('every germ in every look smiles, and is surprised only while popping', () => {
   for (const look of LOOKS)
     for (const color of [0, 1, 2]) {

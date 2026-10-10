@@ -23,8 +23,8 @@
   const keep = () => (saved = writeJson(PROGRESS, progress));
   let saved = $state(true);
 
-  // capsules fall on their own by default (roy, 2026-10-10: it played too much like
-  // a puzzle). a speed someone already picked, calm included, stays theirs.
+  // capsules fall on their own by default; waiting for a drop played too much like
+  // a puzzle. a speed someone already picked, calm included, stays theirs.
   const SPEED = "zap:speed";
   let speed = $state<Speed>(SPEEDS.includes(readSlot(SPEED) as Speed) ? (readSlot(SPEED) as Speed) : "slow");
   function pickSpeed(s: Speed) {
