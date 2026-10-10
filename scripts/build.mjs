@@ -41,7 +41,9 @@ await writeFile(
 const assets = [
   "/",
   ...(await files("dist"))
-    .filter((f) => !f.endsWith("/sw.js") && !f.endsWith("/_headers"))
+    // the worker, the host config and anything under a dot directory never
+    // belong in the shell: one 404 in the list fails the whole install
+    .filter((f) => !f.endsWith("/sw.js") && !f.endsWith("/_headers") && !f.includes("/."))
     .map((f) => f.slice(4)),
 ];
 const worker = await readFile("dist/sw.js", "utf8");

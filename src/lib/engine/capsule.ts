@@ -36,6 +36,8 @@ export interface Capsule {
 // clears some cells, then some pieces fall
 export interface Step {
   cleared: number[]
+  // the colour of each cleared cell, in the same order, so the screen can pop it
+  colors: Color[]
   germs: number
 }
 
@@ -185,8 +187,9 @@ export function resolve(g: Grid<Cell>): Step[] {
         if (p?.kind === 'half') p.link = null
       }
     }
+    const colors = hit.map(i => g.cells[i]!.color)
     for (const i of hit) g.cells[i] = null
-    steps.push({ cleared: hit, germs })
+    steps.push({ cleared: hit, colors, germs })
     settle(g)
   }
   return steps

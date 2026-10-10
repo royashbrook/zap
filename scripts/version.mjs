@@ -32,7 +32,7 @@ export function releaseIdentity(cwd = process.cwd(), release = false) {
     );
   const version = anchor
     ? `${anchor.slice(1)}.${git("rev-list", `${anchor}..HEAD`, "--count")}`
-    : "1.0.0";
+    : "0.1.0";
   return {
     version: release ? version : `${version}-dev`,
     source,

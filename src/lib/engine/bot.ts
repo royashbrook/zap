@@ -4,6 +4,7 @@
 // in hand.
 import { at, shift, turn as turnBody } from './fall.ts'
 import { HEIGHT, WIDTH, drop, type Game } from './capsule.ts'
+import type { Cell } from './types.ts'
 
 interface Plan {
   turn: number
@@ -34,7 +35,7 @@ function score(before: Game, after: Game) {
   let value = (before.germs - after.germs) * 1000
   let top = HEIGHT
   for (let x = 0; x < WIDTH; x++) {
-    const column = []
+    const column: Cell[] = []
     for (let y = 0; y < HEIGHT; y++) {
       const c = at(g, x, y)
       if (c) column.push(c), (top = Math.min(top, y))
