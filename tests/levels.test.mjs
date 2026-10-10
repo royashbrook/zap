@@ -42,3 +42,15 @@ test('a phone looks the deal up instead of running the bot', () => {
   assert.equal(day.variant, table.daily[20261010])
   assert.equal(day.level, DAILY_LEVEL)
 })
+
+test('a shared link opens only boards the bot cleared', async () => {
+  const { shared, deal } = await import('../src/lib/engine/levels.ts')
+  // listed boards open as listed, whatever variant the link claims
+  assert.equal(shared(26, 26, 0).variant, table.campaign[26])
+  assert.equal(shared(20261010, DAILY_LEVEL, 99).variant, table.daily[20261010])
+  // an unlisted board opens only if the variant it names is proven, one try, no search
+  const found = deal(777, 3)
+  assert.equal(shared(777, 3, found.variant).variant, found.variant)
+  for (let v = 0; v < found.variant; v++) assert.equal(shared(777, 3, v), null, `refused v${v}`)
+  assert.equal(shared(777, 3, 50), null, 'past the variants the build ever tries')
+})

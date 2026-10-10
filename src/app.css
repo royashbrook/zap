@@ -452,3 +452,14 @@ a {
     animation: none;
   }
 }
+
+/* the build, top right, small, like the rest of the house */
+.corner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 8px);
+  right: 12px;
+  font: 600 12px ui-monospace, monospace;
+  color: var(--ink-dim, #8a7d72);
+  opacity: 0.8;
+  pointer-events: none;
+}

@@ -96,3 +96,15 @@ export const campaign = (level: number) =>
   level in known.campaign ? dealFor(level, level, known.campaign[level]) : deal(level, level)
 export const daily = (dateSeed: number) =>
   dateSeed in known.daily ? dealFor(dateSeed, DAILY_LEVEL, known.daily[dateSeed]) : deal(dateSeed, DAILY_LEVEL)
+
+// a shared link only ever opens a board the bot cleared. a board the table
+// lists opens as the table has it, whatever variant the link claims. any other
+// board gets one proof of the variant it names, never a search, so a hand-made
+// link costs one bot run at most; null when that proof fails.
+export function shared(seed: number, level: number, variant: number): Deal | null {
+  const listed = seed === level ? known.campaign[level] : level === DAILY_LEVEL ? known.daily[seed] : undefined
+  if (listed !== undefined) return dealFor(seed, level, listed)
+  if (variant >= VARIANTS) return null
+  const named = dealFor(seed, level, variant)
+  return proven(named) ? named : null
+}

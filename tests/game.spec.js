@@ -157,3 +157,78 @@ test("after one visit it reopens with the server gone", async ({ browser }) => {
     await server.close();
   }
 });
+
+// review fixes (#1): a hold ends with its game, a focused button keeps its own
+// keys, and an edited link cannot open a board the bot never cleared
+const capsuleY = (page) => page.locator("#jar g.active").first().evaluate((e) => e.parentElement.getAttribute("transform"));
+
+test("a held drop stops when the pointer is cancelled", async ({ page }) => {
+  await page.goto("/");
+  await page.click("#play");
+  const drop = page.getByRole("button", { name: "drop", exact: true });
+  await drop.dispatchEvent("pointerdown");
+  await page.waitForTimeout(400); // the ease has begun
+  await drop.dispatchEvent("pointercancel");
+  const stopped = await capsuleY(page);
+  await page.waitForTimeout(600);
+  expect(await capsuleY(page)).toBe(stopped);
+});
+
+test("a held drop does not follow the player to the menu or into a new game", async ({ page }) => {
+  await page.goto("/");
+  await page.click("#play");
+  await page.getByRole("button", { name: "drop", exact: true }).dispatchEvent("pointerdown");
+  await page.waitForTimeout(400);
+  await page.click(".back"); // the finger never lifted
+  await page.click("#play");
+  const fresh = await active(page);
+  await page.waitForTimeout(800); // calm: nothing should move it
+  expect(await active(page)).toEqual(fresh);
+});
+
+test("enter and space on a focused button do that button's job", async ({ page }) => {
+  await page.goto("/");
+  await page.click("#play");
+  const start = await active(page);
+  const before = await pieces(page);
+  await page.getByRole("button", { name: "turn", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  const turned = await active(page);
+  expect(turned).not.toEqual(start);
+  await page.keyboard.press("Space");
+  expect(await pieces(page)).toBe(before); // space turned it, it did not drop it
+  expect(await active(page)).not.toEqual(turned);
+});
+
+test("an edited link opens the proven board, not the variant it names", async ({ page }) => {
+  await page.goto("/?seed=26&level=26&v=7");
+  const proven = await page.locator("#jar").innerHTML();
+  await page.goto("/?seed=26&level=26&v=0");
+  expect(await page.locator("#jar").innerHTML()).toBe(proven);
+});
+
+test("a held slide stops when the window loses focus", async ({ page }) => {
+  await page.goto("/");
+  await page.click("#play");
+  await page.getByRole("button", { name: "left", exact: true }).dispatchEvent("pointerdown");
+  await page.evaluate(() => dispatchEvent(new Event("blur")));
+  const stopped = await active(page);
+  await page.waitForTimeout(500);
+  expect(await active(page)).toEqual(stopped);
+});
+
+test("a link to a board nobody proved stays on the menu and says so", async ({ page }) => {
+  await page.goto("/?seed=26&level=26&v=99");
+  // listed: the table's board opens, the bad variant is ignored
+  await expect(page.locator(".hud")).toContainText("FRIEND");
+  // unlisted and refused by the bot (checked: proven(dealFor(999999, 26, 3)) is false)
+  await page.goto("/?seed=999999&level=26&v=3");
+  await expect(page.locator(".toast")).toContainText("does not open a board we checked");
+  await expect(page.locator("#play")).toBeVisible();
+});
+
+test("the menu says what sharing is, and shows the build top right", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#friends")).toHaveText("SEND A BOARD");
+  await expect(page.locator(".corner")).toHaveText(/^v\d+\.\d+\.\d+/);
+});

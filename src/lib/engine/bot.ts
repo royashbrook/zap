@@ -1,7 +1,9 @@
-// a plain greedy player, the proof that a dealt board can be cleared with the
-// capsules that board will really hand out. it only makes moves a kid can make:
-// turn at the top, slide across, drop. no tucks, no lookahead past the capsule
-// in hand.
+// a plain greedy player, the witness that a dealt board can be cleared with the
+// capsules that board will really hand out, in calm, within 400 capsules. it
+// only makes moves a kid can make: turn at the top, slide across, drop, no tucks.
+// it looks one capsule ahead, at the next capsule the window shows, as a kid can.
+// a clear proves the board can be cleared; it does not prove every way of
+// playing wins, or that a timed speed can be kept up with.
 import { at, shift, turn as turnBody } from './fall.ts'
 import { HEIGHT, WIDTH, drop, type Game } from './capsule.ts'
 import type { Cell } from './types.ts'

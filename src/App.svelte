@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { begin, campaign, daily, dealFor, LEVELS, type Deal } from "./lib/engine/levels.ts";
+  import { begin, campaign, daily, LEVELS, shared, type Deal } from "./lib/engine/levels.ts";
   import { drop, move, nudge, rotate, tick, type Game } from "./lib/engine/capsule.ts";
   import { dailySeed } from "./lib/engine/seed.ts";
   import type { Speed } from "./lib/engine/types.ts";
@@ -69,6 +69,7 @@
   });
 
   function play(d: Deal, m: Mode) {
+    release();
     deal = d;
     mode = m;
     game = begin(d, speed);
@@ -108,7 +109,7 @@
   }
   let popTimer: ReturnType<typeof setTimeout>;
   function act(fn: (g: Game) => unknown) {
-    if (!game || game.status !== "playing" || sheet) return;
+    if (!game || screen !== "play" || game.status !== "playing" || sheet) return;
     const before = game.capsules;
     fn(game);
     settled(before);
@@ -138,35 +139,46 @@
   }
 
   // hold to repeat a slide; hold the drop button to ease the capsule down
+  // a hold belongs to the game it started on: a new game, the menu, an open
+  // sheet or a cancelled pointer ends it, so no stray repeat reaches a new board
   let repeat: ReturnType<typeof setTimeout> | undefined;
-  function hold(fn: (g: Game) => unknown, first = 220, every = 90) {
-    act(fn);
+  let dropHeld = false;
+  let dropArmed = false;
+  function release() {
     clearTimeout(repeat);
+    repeat = undefined;
+    dropHeld = false;
+    dropArmed = false;
+  }
+  function repeating(fn: (g: Game) => unknown, first: number, every: number) {
+    const owner = game;
     const again = () => {
-      act(fn);
+      if (game !== owner || screen !== "play" || sheet) return release();
+      fn(owner!);
       repeat = setTimeout(again, every);
     };
     repeat = setTimeout(again, first);
   }
-  let dropHeld = false;
+  function hold(fn: (g: Game) => unknown) {
+    release();
+    act(fn);
+    repeating((g) => act(() => fn(g)), 220, 90);
+  }
   function dropDown() {
-    dropHeld = false;
-    clearTimeout(repeat);
-    repeat = setTimeout(function ease() {
-      dropHeld = true;
-      act(nudge);
-      repeat = setTimeout(ease, 70);
-    }, 220);
+    release();
+    dropArmed = true;
+    repeating(() => ((dropHeld = true), act(nudge)), 220, 70);
   }
   function dropUp() {
-    clearTimeout(repeat);
-    if (!dropHeld) act(drop);
-    dropHeld = false;
+    const tap = dropArmed && !dropHeld;
+    release();
+    if (tap) act(drop);
   }
-  const release = () => clearTimeout(repeat);
 
   function key(e: KeyboardEvent) {
     if (screen !== "play" || sheet) return;
+    // space and enter belong to a focused button; the button does its own job
+    if ((e.key === " " || e.key === "Enter") && (e.target as Element | null)?.closest?.("button, a, input, select, textarea")) return;
     const map: Record<string, (g: Game) => unknown> = {
       ArrowLeft: (g) => move(g, -1),
       ArrowRight: (g) => move(g, 1),
@@ -203,7 +215,7 @@
     touch = null;
   }
 
-  // play with friends: a link that opens the exact board, nothing else to it
+  // send a board: a link that opens the exact board, nothing else to it
   const boardUrl = (d: Deal) => `${location.origin}/?seed=${d.seed}&level=${d.level}&v=${d.variant}`;
   async function share(d: Deal) {
     const url = boardUrl(d);
@@ -251,24 +263,37 @@
     install = installControl((v) => (installVisible = v), () => (sheet = "ios"));
     updates = updateControl(() => (updateReady = true));
     addEventListener("keydown", key);
+    // a hold cannot outlive the player looking away
+    addEventListener("blur", release);
+    addEventListener("pagehide", release);
+    document.addEventListener("visibilitychange", release);
     raf = requestAnimationFrame(loop);
     // a friend's link opens straight onto their board
     const q = new URLSearchParams(location.search);
     const seed = Number(q.get("seed")), level = Number(q.get("level")), v = Number(q.get("v") ?? 0);
-    if (Number.isSafeInteger(seed) && seed > 0 && Number.isSafeInteger(level) && level >= 1 && level <= LEVELS && Number.isSafeInteger(v) && v >= 0)
-      play(dealFor(seed, level, v), "friend");
+    if (Number.isSafeInteger(seed) && seed > 0 && Number.isSafeInteger(level) && level >= 1 && level <= LEVELS && Number.isSafeInteger(v) && v >= 0) {
+      const board = shared(seed, level, v);
+      if (board) play(board, "friend");
+      else flash("that link does not open a board we checked");
+    }
   });
   onDestroy(() => {
     install?.dispose();
     updates?.dispose();
     cancelAnimationFrame(raf);
     clearTimeout(repeat);
-    if (typeof removeEventListener === "function") removeEventListener("keydown", key);
+    if (typeof removeEventListener === "function") {
+      removeEventListener("keydown", key);
+      removeEventListener("blur", release);
+      removeEventListener("pagehide", release);
+      document.removeEventListener("visibilitychange", release);
+    }
   });
 </script>
 
 {#if screen === "menu"}
   <main class="menu">
+    <span class="corner">v{__APP_VERSION__}</span>
     <h1 class="wordmark">
       <svg viewBox="0 0 200 100" aria-hidden="true">{@html preview([0, 2], look)}</svg>
       zap
@@ -286,7 +311,7 @@
       {/each}
     </div>
     <button id="daily" onclick={playDaily}>DAILY</button>
-    <button id="friends" onclick={() => share(campaign(progress.level))}>PLAY WITH FRIENDS</button>
+    <button id="friends" onclick={() => share(campaign(progress.level))}>SEND A BOARD</button>
     <div class="row">
       <button id="howto" onclick={() => (sheet = "howto")}>HOW TO PLAY</button>
       <button id="looks" onclick={() => (sheet = "looks")}>LOOKS</button>
@@ -342,12 +367,12 @@
       {/if}
     </div>
     <nav class="pad" aria-label="controls">
-      <button aria-label="left" onpointerdown={() => hold((g) => move(g, -1))} onpointerup={release} onpointerleave={release}>◀</button>
-      <button aria-label="turn" onpointerdown={() => act((g) => rotate(g, 1))}
+      <button aria-label="left" onpointerdown={() => hold((g) => move(g, -1))} onpointerup={release} onpointerleave={release} onpointercancel={release} onlostpointercapture={release} onclick={(e) => e.detail === 0 && act((g) => move(g, -1))}>◀</button>
+      <button aria-label="turn" onpointerdown={() => act((g) => rotate(g, 1))} onclick={(e) => e.detail === 0 && act((g) => rotate(g, 1))}
         ><svg class="turn" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" /></svg></button
       >
-      <button aria-label="right" onpointerdown={() => hold((g) => move(g, 1))} onpointerup={release} onpointerleave={release}>▶</button>
-      <button aria-label="drop" class="drop" onpointerdown={dropDown} onpointerup={dropUp} onpointerleave={release}>▼</button>
+      <button aria-label="right" onpointerdown={() => hold((g) => move(g, 1))} onpointerup={release} onpointerleave={release} onpointercancel={release} onlostpointercapture={release} onclick={(e) => e.detail === 0 && act((g) => move(g, 1))}>▶</button>
+      <button aria-label="drop" class="drop" onpointerdown={dropDown} onpointerup={dropUp} onpointerleave={release} onpointercancel={release} onlostpointercapture={release} onclick={(e) => e.detail === 0 && act(drop)}>▼</button>
     </nav>
   </main>
 {/if}

@@ -22,8 +22,11 @@ npm run dev     # vite prints the local url
   board you played.
 - four speeds. **calm** is the default: the capsule waits until you drop it.
   slow, medium and fast fall on their own, a little faster each level.
-- every board is dealt from a seed and **played through by a bot with the
-  capsules it will really hand out** before anyone sees it: see
+- every board is dealt from a seed and **cleared by a bot with the capsules it
+  will really hand out** before anyone sees it. the bot turns, slides and drops
+  like a kid, sees the next capsule, and gets 400 capsules in calm. so every board
+  can be cleared; that is not a promise that every way of playing wins, and the
+  timed speeds are not proven. see
   [bot.ts](src/lib/engine/bot.ts) and [levels.ts](src/lib/engine/levels.ts).
   the proven deal for every level and three years of dailies is baked into
   [deals.json](src/lib/engine/deals.json), so a phone looks it up instead of
