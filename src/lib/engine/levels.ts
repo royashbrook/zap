@@ -7,6 +7,7 @@ import { at, put, type Grid } from './fall.ts'
 import { play } from './bot.ts'
 import { rng } from './seed.ts'
 import { COLORS, type Cell, type Color, type Speed } from './types.ts'
+import table from './deals.json' with { type: 'json' }
 
 // four germs a level, the classic ramp, held at a jar a kid can still read
 export const germCount = (level: number) => Math.min(4 * level, 84)
@@ -64,18 +65,34 @@ export interface Deal {
 
 const copy = (g: Grid<Cell>): Grid<Cell> => ({ ...g, cells: g.cells.map(c => (c ? { ...c } : null)) })
 
+// one exact deal, no search: what a table entry or a shared link names
+export const dealFor = (seed: number, level: number, variant: number): Deal => ({
+  seed,
+  level,
+  variant,
+  germSeed: mix(seed, level, variant, 1),
+  capsuleSeed: mix(seed, level, variant, 2),
+})
+
+// the bot plays the deal with its real capsule order; true if it clears the jar
+export const proven = (d: Deal) => play(start(copy(germs(d.germSeed, d.level)), d.level, d.capsuleSeed)).status === 'won'
+
 export function deal(seed: number, level: number): Deal {
   for (let variant = 0; variant < VARIANTS; variant++) {
-    const germSeed = mix(seed, level, variant, 1)
-    const capsuleSeed = mix(seed, level, variant, 2)
-    const proof = play(start(copy(germs(germSeed, level)), level, capsuleSeed))
-    if (proof.status === 'won') return { seed, level, variant, germSeed, capsuleSeed }
+    const d = dealFor(seed, level, variant)
+    if (proven(d)) return d
   }
   throw Error(`no clearable deal for seed ${seed} level ${level}`)
 }
 
 export const begin = (d: Deal, speed: Speed): Game => start(germs(d.germSeed, d.level), d.level, d.capsuleSeed, speed)
 
+// the build proves every campaign level and three years of dailies ahead of
+// time (scripts/deals.mjs), so a phone looks the answer up instead of running
+// the bot. a date past the table still works: it searches, just slower.
+const known = table as { campaign: Record<string, number>; daily: Record<string, number> }
 // campaign level N is seed N; the daily is the date at the daily level
-export const campaign = (level: number) => deal(level, level)
-export const daily = (dateSeed: number) => deal(dateSeed, DAILY_LEVEL)
+export const campaign = (level: number) =>
+  level in known.campaign ? dealFor(level, level, known.campaign[level]) : deal(level, level)
+export const daily = (dateSeed: number) =>
+  dateSeed in known.daily ? dealFor(dateSeed, DAILY_LEVEL, known.daily[dateSeed]) : deal(dateSeed, DAILY_LEVEL)
