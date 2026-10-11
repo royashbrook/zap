@@ -120,6 +120,12 @@ test("the bot's own moves clear level 1 here too, and level 2 unlocks", async ({
   await expect(page.locator("#won")).toBeVisible();
   // no jar is drawn, so the win says what happened in plain words (#9)
   await expect(page.locator("#won h2")).toHaveText("finished!");
+  // the card is outlined on every side, like the board under it (#12)
+  const edges = await page.locator("#won").evaluate((e) => {
+    const c = getComputedStyle(e);
+    return ["Top", "Right", "Bottom", "Left"].map((s) => c[`border${s}Width`] !== "0px" && c[`border${s}Style`] !== "none");
+  });
+  expect(edges).toEqual([true, true, true, true]);
   await page.screenshot({ path: "test-results/won.png" });
   await page.reload();
   await expect(page.locator("#play")).toHaveText("PLAY · LEVEL 1");

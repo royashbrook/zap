@@ -298,6 +298,9 @@ a {
   padding: 20px;
   border-radius: var(--radius);
   background: var(--surface-raised);
+  /* the board is drawn with an ink outline, so the card on top of it gets one
+     too; the shadow alone only marked its bottom edge */
+  border: 3px solid var(--ink);
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
