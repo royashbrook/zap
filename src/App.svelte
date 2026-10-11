@@ -162,6 +162,15 @@
     last = now;
     raf = requestAnimationFrame(loop);
   }
+  // a hidden or departing page goes quiet at that moment, not on the next frame:
+  // a hidden tab may never draw again, and the music keeps its own timer. the
+  // frame clock restarts too, so coming back does not jump by the time away.
+  function quiet() {
+    release();
+    music.pause();
+    last = 0;
+  }
+  const visibility = () => (document.hidden ? quiet() : resume());
   // back from the menu sheet or a hidden tab: the music picks up again
   function resume() {
     if (game && screen === "play" && !sheet && game.status === "playing" && !document.hidden) music.play(fallRate(game));
@@ -294,9 +303,9 @@
     addEventListener("keyup", keyUp);
     // a hold cannot outlive the player looking away, and the music waits too
     addEventListener("blur", release);
-    addEventListener("pagehide", release);
-    document.addEventListener("visibilitychange", release);
-    document.addEventListener("visibilitychange", resume);
+    addEventListener("pagehide", quiet);
+    addEventListener("pageshow", resume);
+    document.addEventListener("visibilitychange", visibility);
     raf = requestAnimationFrame(loop);
     // a friend's link opens straight onto their board
     const q = new URLSearchParams(location.search);
@@ -317,9 +326,9 @@
       removeEventListener("keydown", key);
       removeEventListener("keyup", keyUp);
       removeEventListener("blur", release);
-      removeEventListener("pagehide", release);
-      document.removeEventListener("visibilitychange", release);
-      document.removeEventListener("visibilitychange", resume);
+      removeEventListener("pagehide", quiet);
+      removeEventListener("pageshow", resume);
+      document.removeEventListener("visibilitychange", visibility);
     }
   });
 </script>
