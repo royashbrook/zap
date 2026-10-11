@@ -6,8 +6,6 @@ buy, no accounts, no cookies, nothing sold or shared.** works offline.
 
 play it at [zap.royashbrook.com](https://zap.royashbrook.com).
 
-a [kidgames](https://github.com/royashbrook/kidgames) house game.
-
 ## play locally
 
 ```sh
