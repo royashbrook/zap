@@ -12,6 +12,8 @@ const active = (page) =>
   page.locator("#jar g.active").evaluateAll((els) => els.map((e) => e.parentElement.getAttribute("transform")));
 const pieces = (page) => page.locator("#jar > g").count();
 const press = (page, name) => page.getByRole("button", { name, exact: true }).dispatchEvent("pointerdown");
+// capsules fall on their own by default now; specs about stillness pick calm first
+const calm = (page) => page.addInitScript(() => localStorage.setItem("zap:speed", "calm"));
 
 test("the menu carries the house ethos, word for word", async ({ page }) => {
   await page.goto("/");
@@ -23,6 +25,7 @@ test("the menu carries the house ethos, word for word", async ({ page }) => {
 });
 
 test("a capsule slides, turns and drops, and the jar keeps it", async ({ page }) => {
+  await calm(page);
   await page.goto("/");
   await page.click("#play");
   const start = await active(page);
@@ -41,17 +44,21 @@ test("a capsule slides, turns and drops, and the jar keeps it", async ({ page })
   expect(await active(page)).toEqual(start);
 });
 
-test("calm never falls by itself; slow does", async ({ page }) => {
+test("capsules fall on their own by default; calm still never falls (#3)", async ({ page }) => {
   await page.goto("/");
+  await expect(page.getByRole("radio", { name: "SLOW" })).toHaveAttribute("aria-checked", "true");
+  await page.click("#play");
+  const first = await active(page);
+  await expect.poll(() => active(page), { timeout: 4000 }).not.toEqual(first);
+  await page.click(".back");
+  await page.getByRole("radio", { name: "CALM · NO FALL" }).click();
   await page.click("#play");
   const start = await active(page);
   await page.waitForTimeout(2500);
   expect(await active(page)).toEqual(start);
-  await page.click(".back");
-  await page.getByRole("radio", { name: "SLOW" }).click();
-  await page.click("#play");
-  const first = await active(page);
-  await expect.poll(() => active(page), { timeout: 4000 }).not.toEqual(first);
+  // a saved calm stays calm
+  await page.reload();
+  await expect(page.getByRole("radio", { name: "CALM · NO FALL" })).toHaveAttribute("aria-checked", "true");
 });
 
 test("a look sticks across a reload", async ({ page }) => {
@@ -106,6 +113,7 @@ test("the bot's own moves clear level 1 here too, and level 2 unlocks", async ({
     keys.push(" ");
   }
   expect(game.status).toBe("won");
+  await calm(page);
   await page.goto("/");
   await page.click("#play");
   for (const key of keys) await page.keyboard.press(key === " " ? "Space" : key);
@@ -163,6 +171,7 @@ test("after one visit it reopens with the server gone", async ({ browser }) => {
 const capsuleY = (page) => page.locator("#jar g.active").first().evaluate((e) => e.parentElement.getAttribute("transform"));
 
 test("a held drop stops when the pointer is cancelled", async ({ page }) => {
+  await calm(page);
   await page.goto("/");
   await page.click("#play");
   const drop = page.getByRole("button", { name: "drop", exact: true });
@@ -175,6 +184,7 @@ test("a held drop stops when the pointer is cancelled", async ({ page }) => {
 });
 
 test("a held drop does not follow the player to the menu or into a new game", async ({ page }) => {
+  await calm(page);
   await page.goto("/");
   await page.click("#play");
   await page.getByRole("button", { name: "drop", exact: true }).dispatchEvent("pointerdown");
@@ -187,6 +197,7 @@ test("a held drop does not follow the player to the menu or into a new game", as
 });
 
 test("enter and space on a focused button do that button's job", async ({ page }) => {
+  await calm(page);
   await page.goto("/");
   await page.click("#play");
   const start = await active(page);
@@ -201,6 +212,7 @@ test("enter and space on a focused button do that button's job", async ({ page }
 });
 
 test("an edited link opens the proven board, not the variant it names", async ({ page }) => {
+  await calm(page);
   await page.goto("/?seed=26&level=26&v=7");
   const proven = await page.locator("#jar").innerHTML();
   await page.goto("/?seed=26&level=26&v=0");
@@ -208,6 +220,7 @@ test("an edited link opens the proven board, not the variant it names", async ({
 });
 
 test("a held slide stops when the window loses focus", async ({ page }) => {
+  await calm(page);
   await page.goto("/");
   await page.click("#play");
   await page.getByRole("button", { name: "left", exact: true }).dispatchEvent("pointerdown");
@@ -231,4 +244,85 @@ test("the menu says what sharing is, and shows the build top right", async ({ pa
   await page.goto("/");
   await expect(page.locator("#friends")).toHaveText("SEND A BOARD");
   await expect(page.locator(".corner")).toHaveText(/^v\d+\.\d+\.\d+/);
+});
+
+// playtest round 1 (#4 controls, #6 sound and beat)
+const pieceCount = (page) => page.locator("#jar g.piece:not(.active)").count();
+const activeX = (page) => page.locator("#jar g.active").evaluateAll((els) => Math.min(...els.map((e) => Number(e.parentElement.getAttribute("transform").match(/translate\((\d+)/)[1]))));
+const activeY = (page) => page.locator("#jar g.active").evaluateAll((els) => Math.max(...els.map((e) => Number(e.parentElement.getAttribute("transform").match(/ (\d+)\)/)[1]))));
+
+test("holding drop brings it down fast, and it still steers while held", async ({ page }) => {
+  await calm(page);
+  await page.goto("/");
+  await page.click("#play");
+  const x = await activeX(page);
+  const y = await activeY(page);
+  const drop = page.getByRole("button", { name: "drop", exact: true });
+  await drop.dispatchEvent("pointerdown");
+  await page.waitForTimeout(150);
+  const left = page.getByRole("button", { name: "left", exact: true });
+  await left.dispatchEvent("pointerdown");
+  await left.dispatchEvent("pointerup");
+  await page.waitForTimeout(100);
+  expect(await activeX(page)).toBeLessThan(x);
+  expect(await activeY(page)).toBeGreaterThan(y);
+  await drop.dispatchEvent("pointerup");
+});
+
+test("a landed capsule can still slide before it sticks", async ({ page }) => {
+  // the default speed: if the slide takes it off its ledge, gravity brings it on down
+  await page.goto("/");
+  await page.click("#play");
+  const settled = await pieceCount(page);
+  const drop = page.getByRole("button", { name: "drop", exact: true });
+  await drop.dispatchEvent("pointerdown");
+  // down it comes until it rests on something: still the active capsule
+  await expect.poll(async () => { const y = await activeY(page); await page.waitForTimeout(80); return (await activeY(page)) === y; }, { timeout: 4000 }).toBe(true);
+  await drop.dispatchEvent("pointerup");
+  const x = await activeX(page);
+  await page.keyboard.press(x > 0 ? "ArrowLeft" : "ArrowRight");
+  expect(await activeX(page)).not.toBe(x); // it moved after landing
+  expect(await pieceCount(page)).toBe(settled); // and has not stuck yet
+  await expect.poll(() => pieceCount(page), { timeout: 15000 }).toBe(settled + 2); // then it sticks
+});
+
+test("space drops it straight down and it sticks at once", async ({ page }) => {
+  await calm(page);
+  await page.goto("/");
+  await page.click("#play");
+  const settled = await pieceCount(page);
+  await page.keyboard.press("Space");
+  expect(await pieceCount(page)).toBe(settled + 2);
+});
+
+test("sound on and off sticks across a reload, on the menu and in the game", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#sound")).toHaveText("SOUND ON");
+  await page.click("#sound");
+  await expect(page.locator("#sound")).toHaveText("SOUND OFF");
+  await page.reload();
+  await expect(page.locator("#sound")).toHaveText("SOUND OFF");
+  await page.click("#play");
+  await expect(page.locator("#hud-sound")).toHaveAttribute("aria-label", "sound off");
+  await page.click("#hud-sound");
+  await page.click(".back");
+  await expect(page.locator("#sound")).toHaveText("SOUND ON");
+});
+
+test("pieces bounce on the beat, and not at all with reduced motion", async ({ page }) => {
+  await page.goto("/");
+  await page.click("#play");
+  const pulses = [];
+  for (let i = 0; i < 25; i++) {
+    pulses.push(Number(await page.locator("#jar").evaluate((e) => e.style.getPropertyValue("--pulse") || 0)));
+    await page.waitForTimeout(40);
+  }
+  expect(Math.max(...pulses)).toBeGreaterThan(0.2);
+  expect(Math.min(...pulses)).toBe(0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.reload();
+  await page.click("#play");
+  await page.waitForTimeout(500);
+  expect(await page.locator("#jar g.germ").first().evaluate((e) => getComputedStyle(e).transform)).toBe("none");
+  expect(await page.locator("#jar").evaluate((e) => e.style.getPropertyValue("--pulse"))).toBe("");
 });

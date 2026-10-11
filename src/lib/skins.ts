@@ -18,8 +18,15 @@ export interface Look {
   colors: readonly [string, string, string][]
   jar: { fill: string; edge: string; grid: string }
   half: (color: Color, link: Link) => string
-  germ: (color: Color) => string
+  // germs look happy; surprised only in the instant they pop
+  germ: (color: Color, surprised?: boolean) => string
 }
+
+// a smile, or a small round "oh" while popping
+const mouth = (cx: number, cy: number, w: number, surprised: boolean, ink = '#222') =>
+  surprised
+    ? `<ellipse class="mouth oh" cx="${cx}" cy="${cy + 2}" rx="${w * 0.35}" ry="${w * 0.45}" fill="${ink}"/>`
+    : `<path class="mouth smile" d="M${cx - w} ${cy}Q${cx} ${cy + w * 0.9} ${cx + w} ${cy}" stroke="${ink}" stroke-width="4" fill="none" stroke-linecap="round"/>`
 
 export function mark(color: Color, cx: number, cy: number, r: number, fill: string) {
   if (color === 0) return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`
@@ -51,12 +58,12 @@ const classic: Look = {
     const loose = `<circle cx="50" cy="50" r="40" fill="${body}" stroke="${shade}" stroke-width="5"/>`
     return facing(link, piece, loose) + mark(color, 50, 52, 13, ink)
   },
-  germ(color) {
+  germ(color, surprised = false) {
     const [body, shade, ink] = this.colors[color]
     const bumps = [0, 60, 120, 180, 240, 300]
       .map(a => `<circle cx="${50 + 38 * Math.cos((a * Math.PI) / 180)}" cy="${52 + 34 * Math.sin((a * Math.PI) / 180)}" r="9" fill="${body}"/>`)
       .join('')
-    return `${bumps}<ellipse cx="50" cy="52" rx="36" ry="32" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="37" cy="44" r="7" fill="#fff"/><circle cx="63" cy="44" r="7" fill="#fff"/><circle cx="38" cy="45" r="3.5" fill="#222"/><circle cx="62" cy="45" r="3.5" fill="#222"/>${mark(color, 50, 66, 9, ink)}`
+    return `${bumps}<ellipse cx="50" cy="52" rx="36" ry="32" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="37" cy="44" r="7" fill="#fff"/><circle cx="63" cy="44" r="7" fill="#fff"/><circle cx="38" cy="45" r="3.5" fill="#222"/><circle cx="62" cy="45" r="3.5" fill="#222"/>${mouth(50, 55, 9, surprised)}${mark(color, 50, 72, 8, ink)}`
   },
 }
 
@@ -76,9 +83,9 @@ const space: Look = {
     const loose = `<circle cx="50" cy="50" r="40" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="50" cy="50" r="10" fill="#141A33" stroke="#fff" stroke-width="3"/>`
     return facing(link, piece, loose) + mark(color, 68, 52, 9, ink)
   },
-  germ(color) {
+  germ(color, surprised = false) {
     const [body, shade, ink] = this.colors[color]
-    return `<path d="M34 26L26 8M66 26L74 8" stroke="${shade}" stroke-width="5" stroke-linecap="round"/><circle cx="26" cy="8" r="6" fill="${body}"/><circle cx="74" cy="8" r="6" fill="${body}"/><path d="M14 58Q12 22 50 20Q88 22 86 58Q88 92 70 86Q60 96 50 86Q40 96 30 86Q12 92 14 58Z" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="50" cy="44" r="14" fill="#fff"/><circle cx="52" cy="46" r="7" fill="#141A33"/>${mark(color, 50, 72, 8, ink)}`
+    return `<path d="M34 26L26 8M66 26L74 8" stroke="${shade}" stroke-width="5" stroke-linecap="round"/><circle cx="26" cy="8" r="6" fill="${body}"/><circle cx="74" cy="8" r="6" fill="${body}"/><path d="M14 58Q12 22 50 20Q88 22 86 58Q88 92 70 86Q60 96 50 86Q40 96 30 86Q12 92 14 58Z" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="50" cy="42" r="14" fill="#fff"/><circle cx="52" cy="44" r="7" fill="#141A33"/>${mouth(50, 61, 9, surprised, '#141A33')}${mark(color, 50, 78, 7, ink)}`
   },
 }
 
@@ -98,10 +105,10 @@ const garden: Look = {
     const loose = `<ellipse cx="50" cy="50" rx="40" ry="38" fill="${body}" stroke="${shade}" stroke-width="5"/>`
     return facing(link, piece, loose) + mark(color, 78, 50, 9, ink)
   },
-  germ(color) {
+  germ(color, surprised = false) {
     const [body, shade, ink] = this.colors[color]
-    // a weed: a spiky tuft with a scowl
-    return `<path d="M50 94L20 40L36 50L30 14L48 38L50 6L54 38L70 14L64 50L80 40Z" fill="#6FA343" stroke="#3F6B22" stroke-width="4" stroke-linejoin="round"/><circle cx="50" cy="66" r="26" fill="${body}" stroke="${shade}" stroke-width="5"/><path d="M38 58L46 62M62 58L54 62" stroke="#222" stroke-width="4" stroke-linecap="round"/>${mark(color, 50, 74, 8, ink)}`
+    // a weed: a spiky tuft with a grin
+    return `<path d="M50 94L20 40L36 50L30 14L48 38L50 6L54 38L70 14L64 50L80 40Z" fill="#6FA343" stroke="#3F6B22" stroke-width="4" stroke-linejoin="round"/><circle cx="50" cy="66" r="26" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="41" cy="58" r="4" fill="#222"/><circle cx="59" cy="58" r="4" fill="#222"/>${mouth(50, 66, 7, surprised)}${mark(color, 50, 81, 6, ink)}`
   },
 }
 
@@ -121,10 +128,10 @@ const ocean: Look = {
     const loose = `<circle cx="50" cy="50" r="40" fill="${body}" fill-opacity=".9" stroke="#FFFFFF" stroke-opacity=".8" stroke-width="5"/><path d="M28 36Q36 24 50 22" stroke="#fff" stroke-width="6" stroke-linecap="round" fill="none"/>`
     return facing(link, piece, loose) + mark(color, 54, 56, 11, ink)
   },
-  germ(color) {
+  germ(color, surprised = false) {
     const [body, shade, ink] = this.colors[color]
-    // a grumpy fish
-    return `<path d="M78 50L98 30V70Z" fill="${shade}"/><ellipse cx="46" cy="50" rx="38" ry="28" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="28" cy="42" r="7" fill="#fff"/><circle cx="28" cy="43" r="3.5" fill="#222"/><path d="M20 34L36 38" stroke="#222" stroke-width="4" stroke-linecap="round"/><path d="M16 62Q22 56 28 62" stroke="#222" stroke-width="4" fill="none" stroke-linecap="round"/>${mark(color, 54, 56, 9, ink)}`
+    // a cheerful fish
+    return `<path d="M78 50L98 30V70Z" fill="${shade}"/><ellipse cx="46" cy="50" rx="38" ry="28" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="28" cy="42" r="7" fill="#fff"/><circle cx="28" cy="43" r="3.5" fill="#222"/>${mouth(22, 58, 6, surprised)}${mark(color, 54, 56, 9, ink)}`
   },
 }
 
@@ -147,9 +154,9 @@ const kawaii: Look = {
     const loose = `<circle cx="50" cy="50" r="40" fill="${body}" stroke="${shade}" stroke-width="5"/>`
     return facing(link, piece, loose) + face(50, 44) + mark(color, 50, 72, 7, ink)
   },
-  germ(color) {
+  germ(color, surprised = false) {
     const [body, shade, ink] = this.colors[color]
-    return `<path d="M22 30L30 12L42 26L50 10L58 26L70 12L78 30" fill="${body}" stroke="${shade}" stroke-width="4" stroke-linejoin="round"/><circle cx="50" cy="56" r="36" fill="${body}" stroke="${shade}" stroke-width="5"/><path d="M33 46L43 50M67 46L57 50" stroke="#3B2B2B" stroke-width="4" stroke-linecap="round"/><path d="M40 64Q50 58 60 64" stroke="#3B2B2B" stroke-width="3.5" fill="none" stroke-linecap="round"/>${mark(color, 50, 78, 7, ink)}`
+    return `<path d="M22 30L30 12L42 26L50 10L58 26L70 12L78 30" fill="${body}" stroke="${shade}" stroke-width="4" stroke-linejoin="round"/><circle cx="50" cy="56" r="36" fill="${body}" stroke="${shade}" stroke-width="5"/><circle cx="38" cy="50" r="4.5" fill="#3B2B2B"/><circle cx="62" cy="50" r="4.5" fill="#3B2B2B"/><circle cx="30" cy="60" r="5" fill="#FF8FB1" fill-opacity=".7"/><circle cx="70" cy="60" r="5" fill="#FF8FB1" fill-opacity=".7"/>${mouth(50, 60, 8, surprised, '#3B2B2B')}${mark(color, 50, 79, 7, ink)}`
   },
 }
 

@@ -38,6 +38,8 @@ export interface Step {
   cleared: number[]
   // the colour of each cleared cell, in the same order, so the screen can pop it
   colors: Color[]
+  // whether each cleared cell was a germ, so a germ can look surprised as it pops
+  kinds: Cell['kind'][]
   germs: number
 }
 
@@ -54,13 +56,32 @@ export interface Game {
   last: Step[]
   carry: { rows: number }
   draw: Random
+  // held down: the capsule falls fast and still steers
+  soft: boolean
+  // seconds the capsule has rested on something, null while it can still fall
+  resting: number | null
+  // how many times a move or turn has given a resting capsule more time
+  resets: number
 }
 
-// rows per second at each speed, before the level ramp. calm never falls on
-// its own: the capsule waits until the player drops it.
+// a capsule that lands gets half a second before it locks, so it can still be
+// slid under an overhang or turned into a gap. each move or turn while it rests
+// starts the half second again, up to fifteen times, then it locks anyway.
+export const LOCK_DELAY = 0.5
+export const MAX_RESETS = 15
+// rows per second while the drop control is held
+export const SOFT_RATE = 12
+
+// rows per second at each speed, before the ramp. calm never falls on its own:
+// the capsule waits until the player brings it down.
 const BASE: Record<Speed, number> = { calm: 0, slow: 1.2, medium: 2.2, fast: 3.4 }
-export const rowsPerSecond = (speed: Speed, level: number) =>
-  BASE[speed] * Math.min(2, 1 + 0.05 * (level - 1))
+// the ramp, tetris style: each level is 12% faster than the one before, and
+// every ten capsules in a level adds 3% more. the ramp tops out at three times
+// the base, and nothing ever falls faster than 8 rows a second, so level 30 on
+// fast is quick but still something a kid can steer.
+export const MAX_RATE = 8
+export const rowsPerSecond = (speed: Speed, level: number, capsules = 0) =>
+  Math.min(MAX_RATE, BASE[speed] * Math.min(3, (1 + 0.12 * (level - 1)) * (1 + 0.03 * Math.floor(capsules / 10))))
 
 const pair = (draw: Random): [Color, Color] => [
   Math.floor(draw() * COLORS) as Color,
@@ -82,6 +103,9 @@ export function start(grid: Grid<Cell>, level: number, capsuleSeed: number, spee
     last: [],
     carry: { rows: 0 },
     draw,
+    soft: false,
+    resting: null,
+    resets: 0,
   }
   spawn(game)
   return game
@@ -97,18 +121,36 @@ function spawn(game: Game) {
   game.active = { body, colors: game.next }
   game.next = pair(game.draw)
   game.capsules++
+  game.resting = null
+  game.resets = 0
+}
+
+// a move or turn on a resting capsule buys it another half second, a few times
+function moved(game: Game, ok: boolean) {
+  if (ok && game.resting !== null && game.resets < MAX_RESETS) {
+    game.resting = 0
+    game.resets++
+  }
+  return ok
 }
 
 export const move = (game: Game, dx: -1 | 1) =>
-  game.status === 'playing' && !!game.active && shift(game.grid, game.active.body, dx, 0)
+  game.status === 'playing' && !!game.active && moved(game, shift(game.grid, game.active.body, dx, 0))
 
 export const rotate = (game: Game, by: 1 | -1 = 1) =>
-  game.status === 'playing' && !!game.active && turnBody(game.grid, game.active.body, by)
+  game.status === 'playing' && !!game.active && moved(game, turnBody(game.grid, game.active.body, by))
 
-// one row down by hand; on the floor it locks, like a gravity step would
+// hold or let go of the drop control; the next tick does the falling
+export function soften(game: Game, on: boolean) {
+  game.soft = on
+  if (!on) game.carry.rows = 0
+}
+
+// one row down by hand. on the floor it starts resting rather than locking,
+// so it still gets its half second, like a capsule gravity brought down
 export function nudge(game: Game) {
   if (game.status !== 'playing' || !game.active) return
-  if (!shift(game.grid, game.active.body, 0, 1)) lock(game)
+  if (!shift(game.grid, game.active.body, 0, 1) && game.resting === null) game.resting = 0
 }
 
 export function drop(game: Game) {
@@ -117,15 +159,26 @@ export function drop(game: Game) {
   lock(game)
 }
 
-// gravity for real time. a capsule that cannot fall when gravity asks it to
-// locks there; calm has no gravity, so it only locks when the player drops it.
+// real time: gravity (or a held drop) brings the capsule down, and once it rests
+// on something it locks after LOCK_DELAY unless a move or turn buys it more.
+// calm has no gravity, so a calm capsule only comes down while the drop is held.
 export function tick(game: Game, seconds: number) {
   if (game.status !== 'playing' || !game.active) return
-  const rate = rowsPerSecond(game.speed, game.level)
-  if (rate === 0) return
-  const before = game.carry.rows
-  const { fell } = fall(game.grid, game.active.body, game.carry, rate, seconds)
-  if (fell === 0 && before + rate * seconds >= 1) lock(game)
+  const body = game.active.body
+  const gravity = rowsPerSecond(game.speed, game.level, game.capsules)
+  const rate = game.soft ? Math.max(SOFT_RATE, gravity) : gravity
+  if (rate > 0) fall(game.grid, body, game.carry, rate, seconds)
+  if (fits(game.grid, body, body.turn, body.x, body.y + 1)) {
+    // slid off its ledge, or still in the air: it falls again
+    game.resting = null
+    return
+  }
+  if (game.resting === null) {
+    game.resting = 0
+    return
+  }
+  game.resting += seconds
+  if (game.resting >= LOCK_DELAY) lock(game)
 }
 
 export function ghost(game: Game) {
@@ -140,6 +193,7 @@ function lock(game: Game) {
   )
   game.active = null
   game.carry.rows = 0
+  game.resting = null
   game.last = resolve(game.grid)
   const germs = game.last.reduce((n, s) => n + s.germs, 0)
   game.germs -= germs
@@ -188,8 +242,9 @@ export function resolve(g: Grid<Cell>): Step[] {
       }
     }
     const colors = hit.map(i => g.cells[i]!.color)
+    const kinds = hit.map(i => g.cells[i]!.kind)
     for (const i of hit) g.cells[i] = null
-    steps.push({ cleared: hit, colors, germs })
+    steps.push({ cleared: hit, colors, kinds, germs })
     settle(g)
   }
   return steps
