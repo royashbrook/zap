@@ -118,6 +118,8 @@ test("the bot's own moves clear level 1 here too, and level 2 unlocks", async ({
   await page.click("#play");
   for (const key of keys) await page.keyboard.press(key === " " ? "Space" : key);
   await expect(page.locator("#won")).toBeVisible();
+  // no jar is drawn, so the win says what happened in plain words (#9)
+  await expect(page.locator("#won h2")).toHaveText("finished!");
   await page.screenshot({ path: "test-results/won.png" });
   await page.reload();
   await expect(page.locator("#play")).toHaveText("PLAY · LEVEL 1");

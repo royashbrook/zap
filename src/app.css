@@ -318,8 +318,8 @@ a {
   gap: 10px;
 }
 .pad button {
-  min-height: 64px;
-  font-size: 30px;
+  min-height: 52px;
+  font-size: 26px;
   line-height: 1;
 }
 .pad .turn {
@@ -474,4 +474,28 @@ a {
   color: var(--ink-dim, #8a7d72);
   opacity: 0.8;
   pointer-events: none;
+}
+
+/* one-thumb play: the board and the strip under it take every gesture */
+.surface {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.surface .well {
+  height: 100%;
+}
+.thumb {
+  height: 64px;
+  margin-top: 8px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: var(--surface-sunk);
+  color: var(--ink-dim);
+  font-size: 13px;
+  letter-spacing: 0.04em;
 }
