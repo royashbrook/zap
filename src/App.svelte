@@ -43,6 +43,13 @@
     writeSlot(SOUND, sound ? "on" : "off");
     music.setSound(sound);
   }
+  // the four buttons are an extra; the board itself plays one-thumbed
+  const BUTTONS = "zap:buttons";
+  let buttons = $state(readSlot(BUTTONS) !== "off");
+  function toggleButtons() {
+    buttons = !buttons;
+    writeSlot(BUTTONS, buttons ? "on" : "off");
+  }
   const fallRate = (g: Game) => rowsPerSecond(g.speed, g.level, g.capsules);
   const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -189,6 +196,7 @@
   const releaseDrop = () => game && soften(game, false);
   function release() {
     releaseSlide();
+    releaseTouch();
     releaseDrop();
   }
   function hold(fn: (g: Game) => unknown) {
@@ -231,25 +239,59 @@
     if (e.key === "ArrowDown") releaseDrop();
   }
 
-  // on the jar: a tap turns, a sideways drag slides a column at a time, a flick down drops
-  let touch: { x: number; y: number; moved: boolean; start: number } | null = null;
+  // one thumb plays the whole game, anywhere on the board or the strip under it:
+  // drag sideways and the capsule follows a column per column of travel, a quick
+  // tap turns it, a finger held still (or pulled slowly down) brings it down fast
+  // and keeps steering while it stays down, and a quick flick down drops it.
+  // one finger only; a second one is ignored. buttons never start a gesture.
+  const HOLD_MS = 220; // still this long, and it is a hold, not a tap
+  const SLOW_DOWN = 0.6; // pulled down this many cells, and it is a hold too
+  const FLICK_CELLS = 1.5; // down this far ...
+  const FLICK_MS = 250; // ... this fast, and it drops
+  const TAP_PX = 10;
+  let touch: { id: number; x0: number; y0: number; x: number; start: number; moved: boolean; held: boolean; timer?: ReturnType<typeof setTimeout> } | null = null;
   let jarEl = $state<SVGSVGElement>();
   const cellPx = () => (jarEl ? jarEl.getBoundingClientRect().width / 8 : 40);
+  function releaseTouch() {
+    if (touch) clearTimeout(touch.timer);
+    touch = null;
+  }
+  function holdDown() {
+    if (!touch || touch.held) return;
+    touch.held = true;
+    act((g) => soften(g, true));
+  }
   function down(e: PointerEvent) {
-    touch = { x: e.clientX, y: e.clientY, moved: false, start: performance.now() };
+    if (touch || !game || game.status !== "playing" || (e.target as Element).closest?.("button")) return;
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    const owner = game;
+    touch = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, start: performance.now(), moved: false, held: false };
+    touch.timer = setTimeout(() => {
+      if (touch && game === owner && !touch.moved) holdDown();
+    }, HOLD_MS);
   }
   function drag(e: PointerEvent) {
-    if (!touch) return;
+    if (!touch || e.pointerId !== touch.id) return;
     const step = cellPx();
     while (e.clientX - touch.x >= step) (touch.x += step), (touch.moved = true), act((g) => move(g, 1));
     while (touch.x - e.clientX >= step) (touch.x -= step), (touch.moved = true), act((g) => move(g, -1));
+    // a slow pull down is a hold; a fast one is judged as a flick when the finger lifts
+    if (e.clientY - touch.y0 > step * SLOW_DOWN && performance.now() - touch.start >= FLICK_MS) holdDown();
   }
   function up(e: PointerEvent) {
-    if (!touch) return;
-    const fall = e.clientY - touch.y;
-    if (fall > cellPx() * 1.5 && performance.now() - touch.start < 400) act(drop);
-    else if (!touch.moved && Math.abs(fall) < 12) act((g) => rotate(g, 1));
-    touch = null;
+    if (!touch || e.pointerId !== touch.id) return;
+    const { x0, y0, start, moved, held } = touch;
+    releaseTouch();
+    const fall = e.clientY - y0, quick = performance.now() - start < FLICK_MS;
+    if (held) releaseDrop();
+    if (fall > cellPx() * FLICK_CELLS && quick) act(drop);
+    else if (!moved && !held && Math.abs(fall) < TAP_PX && Math.abs(e.clientX - x0) < TAP_PX) act((g) => rotate(g, 1));
+  }
+  function cancel(e: PointerEvent) {
+    if (!touch || e.pointerId !== touch.id) return;
+    const held = touch.held;
+    releaseTouch();
+    if (held) releaseDrop();
   }
 
   // send a board: a link that opens the exact board, nothing else to it
@@ -358,7 +400,10 @@
       <button id="howto" onclick={() => (sheet = "howto")}>HOW TO PLAY</button>
       <button id="looks" onclick={() => (sheet = "looks")}>LOOKS</button>
     </div>
-    <button id="sound" aria-pressed={sound} onclick={toggleSound}>{sound ? "SOUND ON" : "SOUND OFF"}</button>
+    <div class="row">
+      <button id="sound" aria-pressed={sound} onclick={toggleSound}>{sound ? "SOUND ON" : "SOUND OFF"}</button>
+      <button id="buttons" aria-pressed={buttons} onclick={toggleButtons}>{buttons ? "BUTTONS ON" : "BUTTONS OFF"}</button>
+    </div>
     <div class="row">
       {#if installVisible}<button id="install" onclick={() => install.prompt()}>INSTALL</button>{/if}
       <button id="about" onclick={() => (sheet = "about")}>ABOUT</button>
@@ -376,22 +421,13 @@
       <div class="stat" id="score"><span>score</span><b>{view.score}</b></div>
       <div class="next" aria-label="next capsule"><svg viewBox="0 0 200 100">{@html view.next}</svg></div>
     </header>
+    <div class="surface" role="application" aria-label="play area: drag to slide, tap to turn, hold to fall faster, flick down to drop" onpointerdown={down} onpointermove={drag} onpointerup={up} onpointercancel={cancel} onlostpointercapture={cancel}>
     <div class="well">
-      <svg
-        bind:this={jarEl}
-        id="jar"
-        viewBox="0 0 800 1600"
-        role="img"
-        aria-label="the jar"
-        onpointerdown={down}
-        onpointermove={drag}
-        onpointerup={up}
-        onpointercancel={() => (touch = null)}>{@html view.markup}</svg
-      >
+      <svg bind:this={jarEl} id="jar" viewBox="0 0 800 1600" role="img" aria-label="the board">{@html view.markup}</svg>
       {#if chain > 1}<div class="chain">chain x{chain}!</div>{/if}
       {#if view.status === "won"}
         <div class="over" id="won">
-          <h2>{mode === "campaign" ? "jar clear!" : "you zapped them all!"}</h2>
+          <h2>{mode === "campaign" ? "finished!" : "you zapped them all!"}</h2>
           <p>score {view.score}</p>
           {#if mode === "campaign" && view.level < LEVELS}
             <button class="big" onclick={nextLevel}>NEXT LEVEL</button>
@@ -403,13 +439,16 @@
         </div>
       {:else if view.status === "lost"}
         <div class="over" id="lost">
-          <h2>the jar is full</h2>
+          <h2>out of room</h2>
           <p>no worries. same board, fresh go.</p>
           <button class="big" onclick={again}>TRY AGAIN</button>
           <button onclick={() => (screen = "menu")}>MENU</button>
         </div>
       {/if}
     </div>
+    {#if !buttons}<div class="thumb" aria-hidden="true">drag · tap · hold · flick</div>{/if}
+    </div>
+    {#if buttons}
     <nav class="pad" aria-label="controls">
       <button aria-label="left" onpointerdown={() => hold((g) => move(g, -1))} onpointerup={releaseSlide} onpointerleave={releaseSlide} onpointercancel={releaseSlide} onlostpointercapture={releaseSlide} onclick={(e) => e.detail === 0 && act((g) => move(g, -1))}>◀</button>
       <button aria-label="turn" onpointerdown={() => act((g) => rotate(g, 1))} onclick={(e) => e.detail === 0 && act((g) => rotate(g, 1))}
@@ -418,6 +457,7 @@
       <button aria-label="right" onpointerdown={() => hold((g) => move(g, 1))} onpointerup={releaseSlide} onpointerleave={releaseSlide} onpointercancel={releaseSlide} onlostpointercapture={releaseSlide} onclick={(e) => e.detail === 0 && act((g) => move(g, 1))}>▶</button>
       <button aria-label="drop" class="drop" onpointerdown={dropDown} onpointerup={releaseDrop} onpointerleave={releaseDrop} onpointercancel={releaseDrop} onlostpointercapture={releaseDrop} onclick={(e) => e.detail === 0 && act(nudge)}>▼</button>
     </nav>
+    {/if}
   </main>
 {/if}
 
@@ -429,14 +469,14 @@
     <div class="card">
       {#if sheet === "howto"}
         <h2>how to play</h2>
-        <p>capsules drop into the jar. each one has two halves.</p>
-        <p><b>◀ ▶</b> slide it. the round arrow turns it. hold <b>▼</b> and it falls fast, and you can still slide and turn it.</p>
+        <p>capsules drop onto the board. each one has two halves.</p>
+        <p>one thumb does it all, anywhere on the board: <b>drag</b> to slide, <b>tap</b> to turn, <b>hold</b> to fall faster (you can still slide while you hold), and <b>flick down</b> to drop it straight down.</p>
         <p>when it lands you get a moment to slide it under a ledge or turn it into a gap before it sticks.</p>
-        <p>on the jar: tap to turn, drag to slide, flick down to drop it straight down.</p>
+        <p>or use the buttons: <b>◀ ▶</b> slide, the round arrow turns, hold <b>▼</b> to fall fast. turn them off on the menu if you do not need them.</p>
         <p>line up <b>four of one colour</b>, across or up and down, and they zap. germs count too.</p>
-        <p>zap every germ to clear the jar. loose halves fall, and a fall that makes four again is a chain.</p>
+        <p>zap every germ to finish. loose halves fall, and a fall that makes four again is a chain.</p>
         <p>each colour has its own shape: a circle, a triangle, a square.</p>
-        <p>capsules fall on their own, a bit faster each level. pick slow, medium or fast. <b>calm</b> never falls by itself: hold <b>▼</b> to bring it down.</p>
+        <p>capsules fall on their own, a bit faster each level. pick slow, medium or fast. <b>calm</b> never falls by itself: hold your thumb on the board, or hold <b>▼</b>, to bring it down.</p>
       {:else if sheet === "looks"}
         <h2>looks</h2>
         <div class="looks">
@@ -454,7 +494,7 @@
         </div>
       {:else if sheet === "about"}
         <h2>about zap</h2>
-        <p>a capsule game with a beat. drop capsules into the jar, match four of a colour, and zap every germ. a new board every day, and one to send a friend.</p>
+        <p>a capsule game with a beat. drop capsules onto the board, match four of a colour, and zap every germ. a new board every day, and one to send a friend.</p>
         <p class="ethos">{ETHOS}</p>
         <p class="version">version {__APP_VERSION__}</p>
         <button onclick={checkUpdate}>CHECK FOR UPDATE</button>
