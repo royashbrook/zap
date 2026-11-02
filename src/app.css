@@ -416,8 +416,10 @@ a {
   padding-top: 10px;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
-  gap: 5px;
+  gap: 0 5px;
+  text-align: center;
   font: 13px var(--font-mono);
   color: var(--ink-dim);
 }
@@ -429,9 +431,27 @@ a {
   min-width: 44px;
   color: var(--ink-dim);
 }
-.maker svg {
+.maker .mark-heart {
   width: 16px;
+  height: 16px;
   fill: var(--mark-heart);
+}
+.mark-dot {
+  opacity: 0.45;
+}
+/* the dot travels with sponsor me, so a narrow phone wraps "· sponsor me" as one piece */
+.mark-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0 5px;
+}
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .toast {
   position: fixed;
