@@ -24,6 +24,64 @@ test("the menu carries the house ethos, word for word", async ({ page }) => {
   await expect(page.locator(".maker")).toContainText("made with love by");
 });
 
+// the maker line reads like the royashbrook.com footer: "made with", the heart, then "by"
+// (the word love rides along as screen-reader text only), and every row sits centred
+const makerLine = (page) =>
+  page.locator(".maker").evaluate((line) => {
+    const seq = [];
+    const walk = (n) => {
+      for (const c of n.childNodes) {
+        if (c.nodeType === 3) seq.push(c.textContent);
+        else if (c.localName === "svg") seq.push(" <svg> ");
+        else walk(c);
+      }
+    };
+    walk(line);
+    const text = seq.join("").replace(/\s+/g, " ").trim().toLowerCase();
+    const cs = getComputedStyle(line);
+    const box = line.getBoundingClientRect();
+    const left = box.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+    const right = box.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight);
+    const hidden = (el) => {
+      for (let e = el; e && e !== line; e = e.parentElement) {
+        const r = e.getBoundingClientRect();
+        if (r.width <= 1 && r.height <= 1) return true;
+      }
+      return false;
+    };
+    const rects = [];
+    for (const el of line.querySelectorAll("*")) if (!hidden(el)) rects.push(...el.getClientRects());
+    const texts = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    for (let t = texts.nextNode(); t; t = texts.nextNode()) {
+      if (hidden(t.parentElement)) continue;
+      for (const m of t.textContent.matchAll(/\S+/g)) {
+        const r = document.createRange();
+        r.setStart(t, m.index);
+        r.setEnd(t, m.index + m[0].length);
+        rects.push(...r.getClientRects());
+      }
+    }
+    const rows = [];
+    for (const r of [...rects].filter((r) => r.width > 0 && r.height > 0).sort((a, b) => a.top - b.top)) {
+      const row = rows.find((w) => Math.min(w.bottom, r.bottom) - Math.max(w.top, r.top) > Math.min(w.bottom - w.top, r.height) / 2);
+      if (row) Object.assign(row, { left: Math.min(row.left, r.left), right: Math.max(row.right, r.right), top: Math.min(row.top, r.top), bottom: Math.max(row.bottom, r.bottom) });
+      else rows.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    }
+    return { text, rows: rows.map((w) => Math.round(w.left - left - (right - w.right))) };
+  });
+
+test("the maker line is made with ♥ by roy + ai, centred on every row (kidgames#18)", async ({ page }) => {
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/");
+    await page.click("#about");
+    const { text, rows } = await makerLine(page);
+    expect(text, `at ${width}px`).toMatch(/^made with <svg> (love )?by roy \+ ai · sponsor me$/);
+    expect(rows.length, `at ${width}px`).toBeGreaterThan(0);
+    for (const skew of rows) expect(Math.abs(skew), `row left gap minus right gap at ${width}px`).toBeLessThanOrEqual(2);
+  }
+});
+
 test("a capsule slides, turns and drops, and the jar keeps it", async ({ page }) => {
   await calm(page);
   await page.goto("/");
